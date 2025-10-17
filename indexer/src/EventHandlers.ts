@@ -1,9 +1,17 @@
 import { ProjectRegistry, CornerstoneProject } from "generated";
 
+// Register newly created CornerstoneProject contracts for dynamic indexing
+ProjectRegistry.ProjectCreated.contractRegister(async ({ event, context }) => {
+  context.addCornerstoneProject(event.params.project);
+});
+
 export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
   async ({ event, context }) => {
     const projectAddress = event.params.project.toLowerCase();
     const txHash = event.block.hash;
+
+    // CornerstoneProject contract is registered via contractRegister above
+    // This handler processes the ProjectCreated event and stores the project data
 
     context.Project.set({
       id: projectAddress,
