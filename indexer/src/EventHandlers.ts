@@ -32,14 +32,14 @@ function convertIpfsToHttp(uri: string): string | null {
   return null;
 }
 
-// Fetch from a specific endpoint with shorter timeout
+// Fetch from a specific endpoint
 async function fetchFromEndpoint(
   context: EffectContext,
   url: string
 ): Promise<ProjectMetadata | null> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // Reduced to 5s
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -67,8 +67,7 @@ async function fetchFromEndpoint(
   }
 }
 
-// Create the effect for fetching IPFS metadata
-// CRITICAL FIX: Added async keyword here
+// CRITICAL FIX: The effect function must be an async arrow function
 export const getProjectMetadata = experimental_createEffect(
   {
     name: "getProjectMetadata",
@@ -118,19 +117,21 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
   loader: async ({ event, context }) => {
     const metadataURI = event.params.metadataURI || "";
     
-    // CRITICAL FIX: Wrap in try-catch to prevent loader failures from blocking indexer
+    // Skip fetching if no URI
+    if (!metadataURI || metadataURI.trim() === "") {
+      return { name: null, description: null, image: null };
+    }
+    
     try {
-      if (metadataURI) {
-        return await context.effect(getProjectMetadata, metadataURI);
-      }
+      // Call the effect to fetch metadata
+      return await context.effect(getProjectMetadata, metadataURI);
     } catch (error) {
       context.log.error("Error fetching metadata in loader", { 
         error: error instanceof Error ? error.message : String(error),
         metadataURI 
       });
+      return { name: null, description: null, image: null };
     }
-    
-    return { name: null, description: null, image: null };
   },
   handler: async ({ event, context, loaderReturn }) => {
     const projectAddress = event.params.project.toLowerCase();
@@ -149,7 +150,6 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
       createdAtBlock: BigInt(event.block.number),
       createdAtTimestamp: BigInt(event.block.timestamp),
       metadataURI: metadataURI,
-      // Metadata fields from IPFS - handle nulls properly
       name: metadata.name || undefined,
       description: metadata.description || undefined,
       imageURI: metadata.image || undefined,
