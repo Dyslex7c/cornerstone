@@ -41,7 +41,7 @@ function normalizeMetadataURI(uri: string): string {
   return normalized;
 }
 
-// Fetch metadata from IPFS with fallback gateways
+// Fetch metadata from IPFS with fallback gateways (Original logic for image URI kept simple)
 async function fetchMetadataFromEndpoint(
   context: EffectContext,
   endpoint: string,
@@ -56,15 +56,15 @@ async function fetchMetadataFromEndpoint(
     if (response.ok) {
       const metadata: any = await response.json();
       
-      // Normalize the image URI (remove ipfs:// prefix if present)
+      // Store the image path/hash as provided, removing ipfs:// if present
       const imageURI = metadata.image 
-        ? metadata.image.replace(/^ipfs:\/\//, "ipfs://")
+        ? metadata.image.replace(/^ipfs:\/\//, "")
         : "";
       
       return {
         name: metadata.name || "",
         description: metadata.description || "",
-        image: imageURI,
+        image: imageURI, // Storing the raw path/hash
       };
     } else {
       context.log.warn(`Metadata fetch returned non-200 status`, { 
@@ -143,19 +143,31 @@ export const getProjectContractState = experimental_createEffect(
   async ({ input: projectAddress, context }) => {
     context.log.info(`Fetching initial contract state for: ${projectAddress}`);
     
-    // Get the contract instance from the context
+    // Get the contract instance
     const projectContract = context.CornerstoneProject.get(projectAddress);
     
-    // Fetch all necessary view function data
-    const [
-      minRaise,
-      maxRaise,
-      withdrawableDevFunds,
-    ] = await Promise.all([
-      projectContract.minRaise(),
-      projectContract.maxRaise(),
-      projectContract.withdrawableDevFunds(),
-    ]);
+    let minRaise = 0n;
+    let maxRaise = 0n;
+    let withdrawableDevFunds = 0n;
+
+    // Fetch view functions individually with robust error handling
+    try {
+      minRaise = await projectContract.minRaise();
+    } catch (e) {
+      context.log.warn(`Failed to fetch minRaise for ${projectAddress}`, { error: e });
+    }
+    
+    try {
+      maxRaise = await projectContract.maxRaise();
+    } catch (e) {
+      context.log.warn(`Failed to fetch maxRaise for ${projectAddress}`, { error: e });
+    }
+    
+    try {
+      withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+    } catch (e) {
+      context.log.warn(`Failed to fetch withdrawableDevFunds for ${projectAddress}`, { error: e });
+    }
     
     return {
       minRaise,
@@ -174,6 +186,8 @@ export const getWithdrawableDevFunds = experimental_createEffect(
   },
   async ({ input: projectAddress, context }) => {
     const projectContract = context.CornerstoneProject.get(projectAddress);
+    
+    // Keep this simple since it's used inside the handler's try/catch block
     return projectContract.withdrawableDevFunds();
   }
 );
@@ -206,17 +220,21 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
 
     let contractState: ProjectStateData | undefined;
     try {
+      // This call now uses the robust getProjectContractState effect
       contractState = await context.effect(
         getProjectContractState, 
         event.params.project // Pass the contract address
       );
     } catch (error) {
+      // This catch block should rarely be hit if the effect is robust, 
+      // but it remains as a final safeguard.
       context.log.error(
-        "Error fetching project contract state with effect", 
+        "Fatal error fetching project contract state with effect", 
         error as Error
       );
     }
 
+    // Default to 0n if contractState is undefined or properties are missing (due to effect failing gracefully)
     const minRaise = contractState?.minRaise ?? 0n;
     const maxRaise = contractState?.maxRaise ?? 0n;
     const withdrawableDevFunds = contractState?.withdrawableDevFunds ?? 0n;
