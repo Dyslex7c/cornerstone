@@ -1,14 +1,4 @@
 import { ProjectRegistry, CornerstoneProject } from "generated";
-import { experimental_createEffect, S, type EffectContext } from "envio";
-
-// Define schema for project metadata - using nullable types properly
-const projectMetadataSchema = S.schema({
-  name: S.nullable(S.string),
-  description: S.nullable(S.string),
-  image: S.nullable(S.string),
-});
-
-type ProjectMetadata = S.Infer<typeof projectMetadataSchema>;
 
 // IPFS gateways to try
 const IPFS_GATEWAYS = [
@@ -32,81 +22,58 @@ function convertIpfsToHttp(uri: string): string | null {
   return null;
 }
 
-// Fetch from a specific endpoint
-async function fetchFromEndpoint(
-  context: EffectContext,
-  url: string
-): Promise<ProjectMetadata | null> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'Accept': 'application/json',
-      }
-    });
-    
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const metadata = await response.json();
-      return {
-        name: metadata.name || null,
-        description: metadata.description || null,
-        image: metadata.image || null,
-      };
-    } else {
-      context.log.warn(`IPFS didn't return 200`, { url, status: response.status });
-      return null;
-    }
-  } catch (e) {
-    context.log.warn(`IPFS fetch failed`, { url, err: e });
-    return null;
-  }
-}
-
-// CRITICAL FIX: The effect function must be an async arrow function
-export const getProjectMetadata = experimental_createEffect(
-  {
-    name: "getProjectMetadata",
-    input: S.string,
-    output: projectMetadataSchema,
-    cache: true,
-  },
-  async ({ input: metadataURI, context }) => {
-    // Return early if no URI
-    if (!metadataURI || metadataURI.trim() === "") {
-      return { name: null, description: null, image: null };
-    }
-
-    const httpUrl = convertIpfsToHttp(metadataURI);
-    
-    if (!httpUrl) {
-      context.log.warn("Invalid metadata URI", { metadataURI });
-      return { name: null, description: null, image: null };
-    }
-
-    // Try the converted URL first
-    let metadata = await fetchFromEndpoint(context, httpUrl);
-    if (metadata) return metadata;
-
-    // If first gateway fails, try others for IPFS URIs
-    if (metadataURI.startsWith('ipfs://') || metadataURI.startsWith('Qm') || metadataURI.startsWith('baf')) {
-      const hash = metadataURI.replace('ipfs://', '');
-      
-      for (let i = 1; i < IPFS_GATEWAYS.length; i++) {
-        const alternativeUrl = `${IPFS_GATEWAYS[i]}/${hash}`;
-        metadata = await fetchFromEndpoint(context, alternativeUrl);
-        if (metadata) return metadata;
-      }
-    }
-
-    // Return null metadata if all attempts fail
+// Fetch metadata from IPFS - simplified version
+async function fetchMetadata(metadataURI: string, context: any) {
+  if (!metadataURI || metadataURI.trim() === "") {
     return { name: null, description: null, image: null };
   }
-);
+
+  const httpUrl = convertIpfsToHttp(metadataURI);
+  
+  if (!httpUrl) {
+    context.log.warn("Invalid metadata URI", { metadataURI });
+    return { name: null, description: null, image: null };
+  }
+
+  // Try each gateway
+  const urlsToTry = [httpUrl];
+  
+  // Add alternative gateways for IPFS URIs
+  if (metadataURI.startsWith('ipfs://') || metadataURI.startsWith('Qm') || metadataURI.startsWith('baf')) {
+    const hash = metadataURI.replace('ipfs://', '');
+    for (let i = 1; i < IPFS_GATEWAYS.length; i++) {
+      urlsToTry.push(`${IPFS_GATEWAYS[i]}/${hash}`);
+    }
+  }
+
+  // Try each URL
+  for (const url of urlsToTry) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const metadata = await response.json();
+        return {
+          name: metadata.name || null,
+          description: metadata.description || null,
+          image: metadata.image || null,
+        };
+      }
+    } catch (e) {
+      context.log.debug(`IPFS fetch failed for ${url}`, { err: e });
+    }
+  }
+
+  return { name: null, description: null, image: null };
+}
 
 // Register new CornerstoneProject contracts dynamically
 ProjectRegistry.ProjectCreated.contractRegister(({ event, context }) => {
@@ -117,14 +84,9 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
   loader: async ({ event, context }) => {
     const metadataURI = event.params.metadataURI || "";
     
-    // Skip fetching if no URI
-    if (!metadataURI || metadataURI.trim() === "") {
-      return { name: null, description: null, image: null };
-    }
-    
     try {
-      // Call the effect to fetch metadata
-      return await context.effect(getProjectMetadata, metadataURI);
+      // Fetch metadata directly without using experimental_createEffect
+      return await fetchMetadata(metadataURI, context);
     } catch (error) {
       context.log.error("Error fetching metadata in loader", { 
         error: error instanceof Error ? error.message : String(error),
@@ -138,7 +100,6 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
     const txHash = event.block.hash;
     const metadataURI = event.params.metadataURI || "";
 
-    // Get metadata from loaderReturn
     const metadata = loaderReturn || { name: null, description: null, image: null };
     const metadataFetched = !!(metadata.name || metadata.description || metadata.image);
 
@@ -190,7 +151,6 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
       lastUpdatedTimestamp: BigInt(event.block.timestamp),
     });
 
-    // Initialize phase metrics
     for (let i = 0; i <= 5; i++) {
       const phaseMetricsId = `${projectAddress}-phase-${i}`;
       context.PhaseMetrics.set({
