@@ -1,5 +1,48 @@
 import { ProjectRegistry, CornerstoneProject } from "generated";
 import { experimental_createEffect, S, type EffectContext } from "envio";
+import { createPublicClient, http } from "viem";
+import { sepolia } from "viem/chains";
+
+// Setup RPC client with multicall enabled
+const RPC_URL = process.env.RPC_URL || "https://rpc.sepolia.org";
+const client = createPublicClient({
+  chain: sepolia,
+  batch: { multicall: true }, // Enable multicall batching
+  transport: http(RPC_URL, { batch: true }),
+});
+
+// ABI for CornerstoneProject contract view functions
+const projectContractAbi = [
+  {
+    inputs: [],
+    name: "minRaise",
+    outputs: [{ type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "maxRaise",
+    outputs: [{ type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "withdrawableDevFunds",
+    outputs: [{ type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// Helper to get contract instance
+function getProjectContract(address: string) {
+  return {
+    address: address as `0x${string}`,
+    abi: projectContractAbi,
+  };
+}
 
 // Define the schema for the project metadata
 const projectMetadataSchema = S.schema({
@@ -141,39 +184,48 @@ export const getProjectContractState = experimental_createEffect(
     cache: true,
   },
   async ({ input: projectAddress, context }) => {
-    context.log.info(`Fetching initial contract state for: ${projectAddress}`);
+    context.log.info(`Fetching contract state for: ${projectAddress}`);
     
-    // Get the contract instance
-    const projectContract = context.CornerstoneProject.get(projectAddress);
+    const projectContract = getProjectContract(projectAddress);
     
-    let minRaise = 0n;
-    let maxRaise = 0n;
-    let withdrawableDevFunds = 0n;
+    try {
+      // Use multicall to batch all three contract calls efficiently
+      const results = await client.multicall({
+        allowFailure: false,
+        contracts: [
+          {
+            ...projectContract,
+            functionName: "minRaise",
+          },
+          {
+            ...projectContract,
+            functionName: "maxRaise",
+          },
+          {
+            ...projectContract,
+            functionName: "withdrawableDevFunds",
+          },
+        ],
+      });
 
-    // Fetch view functions individually with robust error handling
-    try {
-      minRaise = await projectContract.minRaise();
-    } catch (e) {
-      context.log.warn(`Failed to fetch minRaise for ${projectAddress}`, { error: e });
+      const [minRaise, maxRaise, withdrawableDevFunds] = results;
+
+      return {
+        minRaise: minRaise as bigint,
+        maxRaise: maxRaise as bigint,
+        withdrawableDevFunds: withdrawableDevFunds as bigint,
+      };
+    } catch (error) {
+      context.log.error(`Failed to fetch contract state for ${projectAddress}`, {
+        error: error,
+      });
+      // Return default values on error
+      return {
+        minRaise: 0n,
+        maxRaise: 0n,
+        withdrawableDevFunds: 0n,
+      };
     }
-    
-    try {
-      maxRaise = await projectContract.maxRaise();
-    } catch (e) {
-      context.log.warn(`Failed to fetch maxRaise for ${projectAddress}`, { error: e });
-    }
-    
-    try {
-      withdrawableDevFunds = await projectContract.withdrawableDevFunds();
-    } catch (e) {
-      context.log.warn(`Failed to fetch withdrawableDevFunds for ${projectAddress}`, { error: e });
-    }
-    
-    return {
-      minRaise,
-      maxRaise,
-      withdrawableDevFunds,
-    };
   }
 );
 
@@ -182,13 +234,24 @@ export const getWithdrawableDevFunds = experimental_createEffect(
     name: "getWithdrawableDevFunds",
     input: S.string, 
     output: S.bigint,
-    cache: false,
+    cache: false, // Don't cache this as it changes frequently
   },
   async ({ input: projectAddress, context }) => {
-    const projectContract = context.CornerstoneProject.get(projectAddress);
+    const projectContract = getProjectContract(projectAddress);
     
-    // Keep this simple since it's used inside the handler's try/catch block
-    return projectContract.withdrawableDevFunds();
+    try {
+      const result = await client.readContract({
+        ...projectContract,
+        functionName: "withdrawableDevFunds",
+      });
+      
+      return result as bigint;
+    } catch (error) {
+      context.log.error(`Failed to fetch withdrawableDevFunds for ${projectAddress}`, {
+        error: error,
+      });
+      return 0n;
+    }
   }
 );
 
