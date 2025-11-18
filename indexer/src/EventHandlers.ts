@@ -1,4 +1,130 @@
 import { ProjectRegistry, CornerstoneProject } from "generated";
+import { experimental_createEffect, S, type EffectContext } from "envio";
+
+// Define the schema for the project metadata
+const projectMetadataSchema = S.schema({
+  name: S.string,
+  description: S.string,
+  image: S.string,
+});
+
+type ProjectMetadata = S.Infer<typeof projectMetadataSchema>;
+
+// Multiple IPFS gateway endpoints for redundancy
+const ipfsEndpoints = [
+  ...(process.env.IPFS_GATEWAY ? [process.env.IPFS_GATEWAY] : []),
+  "https://w3s.link/ipfs",
+  "https://cloudflare-ipfs.com/ipfs",
+  "https://ipfs.io/ipfs",
+  "https://gateway.pinata.cloud/ipfs",
+];
+
+// Helper function to normalize IPFS URIs
+function normalizeMetadataURI(uri: string): string {
+  // Remove ipfs:// prefix if present
+  let normalized = uri.replace(/^ipfs:\/\//, "");
+  
+  // Add metadata.json if not present
+  if (!normalized.endsWith("metadata.json") && !normalized.endsWith(".json")) {
+    normalized = normalized.endsWith("/") 
+      ? `${normalized}metadata.json` 
+      : `${normalized}/metadata.json`;
+  }
+  
+  return normalized;
+}
+
+// Fetch metadata from IPFS with fallback gateways
+async function fetchMetadataFromEndpoint(
+  context: EffectContext,
+  endpoint: string,
+  metadataPath: string
+): Promise<ProjectMetadata | null> {
+  try {
+    const url = `${endpoint}/${metadataPath}`;
+    context.log.info(`Attempting to fetch metadata from: ${url}`);
+    
+    const response = await fetch(url);
+    
+    if (response.ok) {
+      const metadata: any = await response.json();
+      
+      // Normalize the image URI (remove ipfs:// prefix if present)
+      const imageURI = metadata.image 
+        ? metadata.image.replace(/^ipfs:\/\//, "ipfs://")
+        : "";
+      
+      return {
+        name: metadata.name || "",
+        description: metadata.description || "",
+        image: imageURI,
+      };
+    } else {
+      context.log.warn(`Metadata fetch returned non-200 status`, { 
+        url, 
+        status: response.status 
+      });
+      return null;
+    }
+  } catch (e) {
+    context.log.warn(`Metadata fetch failed`, { 
+      endpoint, 
+      metadataPath, 
+      error: e 
+    });
+    return null;
+  }
+}
+
+// Create an effect for fetching project metadata
+export const getProjectMetadata = experimental_createEffect(
+  {
+    name: "getProjectMetadata",
+    input: S.string,
+    output: projectMetadataSchema,
+    cache: true, // Enable caching to avoid repeated fetches
+  },
+  async ({ input: metadataURI, context }) => {
+    // Skip if no metadata URI provided
+    if (!metadataURI || metadataURI === "") {
+      context.log.info("No metadata URI provided");
+      return { 
+        name: "", 
+        description: "", 
+        image: "" 
+      };
+    }
+
+    const normalizedPath = normalizeMetadataURI(metadataURI);
+    context.log.info(`Fetching metadata from normalized path: ${normalizedPath}`);
+
+    // Try each endpoint until one succeeds
+    for (const endpoint of ipfsEndpoints) {
+      const metadata = await fetchMetadataFromEndpoint(
+        context, 
+        endpoint, 
+        normalizedPath
+      );
+      
+      if (metadata) {
+        context.log.info(`Successfully fetched metadata from ${endpoint}`);
+        return metadata;
+      }
+    }
+
+    // If all endpoints fail, log error and return empty values
+    context.log.error(
+      "Unable to fetch metadata from any IPFS gateway",
+      { metadataURI, normalizedPath }
+    );
+    
+    return { 
+      name: "", 
+      description: "", 
+      image: "" 
+    };
+  }
+);
 
 // Register new CornerstoneProject contracts dynamically
 ProjectRegistry.ProjectCreated.contractRegister(({ event, context }) => {
@@ -13,6 +139,19 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
     // Get metadataURI from event params
     const metadataURI = event.params.metadataURI || "";
 
+    // Fetch metadata from IPFS if metadataURI is provided
+    let metadata: ProjectMetadata | undefined;
+    let metadataFetchError: string | undefined;
+    
+    if (metadataURI && metadataURI !== "") {
+      try {
+        metadata = await context.effect(getProjectMetadata, metadataURI);
+      } catch (error) {
+        context.log.error("Error fetching project metadata", error as Error);
+        metadataFetchError = (error as Error).message;
+      }
+    }
+
     context.Project.set({
       id: projectAddress,
       address: event.params.project,
@@ -22,11 +161,11 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
       createdAtTimestamp: BigInt(event.block.timestamp),
       metadataURI: metadataURI,
       projectState_id: projectAddress,
-      description: undefined,
-      imageURI: undefined,
-      metadataFetchError: undefined,
-      metadataFetched: false,
-      name: undefined
+      description: metadata?.description,
+      imageURI: metadata?.image,
+      metadataFetchError: metadataFetchError,
+      metadataFetched: metadata !== undefined,
+      name: metadata?.name,
     });
 
     context.ProjectCreatedEvent.set({
