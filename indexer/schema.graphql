@@ -14,6 +14,11 @@ type Project {
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   metadataURI: String!
+  name: String
+  description: String
+  imageURI: String
+  metadataFetched: Boolean!
+  metadataFetchError: String
   projectState: ProjectState
   depositors: [DepositorMetrics!]! @derivedFrom(field: "project")
   events: [ProjectCreatedEvent!]! @derivedFrom(field: "project")
