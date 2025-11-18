@@ -151,9 +151,6 @@ export const getProjectContractState = experimental_createEffect(
       minRaise,
       maxRaise,
       withdrawableDevFunds,
-      // Phase caps are usually calculated or fetched differently, 
-      // but let's assume a phaseCaps view function for completeness based on your configuration event
-      phaseCaps, 
     ] = await Promise.all([
       projectContract.minRaise(),
       projectContract.maxRaise(),
