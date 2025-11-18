@@ -1,4 +1,4 @@
-import { ProjectRegistry, CornerstoneProject } from "generated";
+\import { ProjectRegistry, CornerstoneProject } from "generated";
 import { experimental_createEffect, S, type EffectContext } from "envio";
 
 // Define schema for project metadata
@@ -113,8 +113,8 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
     const metadataURI = event.params.metadataURI || "";
     
     if (metadataURI) {
-      // Use the effect to fetch metadata
-      return await getProjectMetadata(metadataURI, context);
+      // Use context.effect() to call the effect in the loader
+      return await context.effect(getProjectMetadata, metadataURI);
     }
     
     return { name: undefined, description: undefined, image: undefined };
@@ -124,7 +124,7 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
     const txHash = event.block.hash;
     const metadataURI = event.params.metadataURI || "";
 
-    // Get metadata from loader
+    // Get metadata from loaderReturn (not from effect directly)
     const metadata = loaderReturn;
     const metadataFetched = !!(metadata.name || metadata.description || metadata.image);
 
