@@ -8,7 +8,14 @@ const projectMetadataSchema = S.schema({
   image: S.string,
 });
 
+const projectStateSchema = S.schema({
+  minRaise: S.bigint,
+  maxRaise: S.bigint,
+  withdrawableDevFunds: S.bigint,
+});
+
 type ProjectMetadata = S.Infer<typeof projectMetadataSchema>;
+type ProjectStateData = S.Infer<typeof projectStateSchema>;
 
 // Multiple IPFS gateway endpoints for redundancy
 const ipfsEndpoints = [
@@ -126,6 +133,54 @@ export const getProjectMetadata = experimental_createEffect(
   }
 );
 
+export const getProjectContractState = experimental_createEffect(
+  {
+    name: "getProjectContractState",
+    input: S.string, // Input is the project address
+    output: projectStateSchema,
+    cache: true,
+  },
+  async ({ input: projectAddress, context }) => {
+    context.log.info(`Fetching initial contract state for: ${projectAddress}`);
+    
+    // Get the contract instance from the context
+    const projectContract = context.CornerstoneProject.get(projectAddress);
+    
+    // Fetch all necessary view function data
+    const [
+      minRaise,
+      maxRaise,
+      withdrawableDevFunds,
+      // Phase caps are usually calculated or fetched differently, 
+      // but let's assume a phaseCaps view function for completeness based on your configuration event
+      phaseCaps, 
+    ] = await Promise.all([
+      projectContract.minRaise(),
+      projectContract.maxRaise(),
+      projectContract.withdrawableDevFunds(),
+    ]);
+    
+    return {
+      minRaise,
+      maxRaise,
+      withdrawableDevFunds,
+    };
+  }
+);
+
+export const getWithdrawableDevFunds = experimental_createEffect(
+  {
+    name: "getWithdrawableDevFunds",
+    input: S.string, 
+    output: S.bigint,
+    cache: false,
+  },
+  async ({ input: projectAddress, context }) => {
+    const projectContract = context.CornerstoneProject.get(projectAddress);
+    return projectContract.withdrawableDevFunds();
+  }
+);
+
 // Register new CornerstoneProject contracts dynamically
 ProjectRegistry.ProjectCreated.contractRegister(({ event, context }) => {
   context.addCornerstoneProject(event.params.project);
@@ -152,20 +207,22 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
       }
     }
 
-    let minRaise = 0n;
-    let maxRaise = 0n;
-    let withdrawableDevFunds = 0n;
-
+    let contractState: ProjectStateData | undefined;
     try {
-      const projectContract = context.CornerstoneProject.get(event.params.project);
-      
-      // These are view functions on the CornerstoneProject contract
-      minRaise = await projectContract.minRaise();
-      maxRaise = await projectContract.maxRaise();
-      withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+      contractState = await context.effect(
+        getProjectContractState, 
+        event.params.project // Pass the contract address
+      );
     } catch (error) {
-      context.log.error("Error fetching project contract values", error as Error);
+      context.log.error(
+        "Error fetching project contract state with effect", 
+        error as Error
+      );
     }
+
+    const minRaise = contractState?.minRaise ?? 0n;
+    const maxRaise = contractState?.maxRaise ?? 0n;
+    const withdrawableDevFunds = contractState?.withdrawableDevFunds ?? 0n;
 
     context.Project.set({
       id: projectAddress,
@@ -267,8 +324,10 @@ export const handleDeposit = CornerstoneProject.Deposit.handler(
     let project = await context.Project.get(projectAddress);
     if (project) {
       try {
-        const projectContract = context.CornerstoneProject.get(event.srcAddress);
-        const withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+        const withdrawableDevFunds = await context.effect(
+          getWithdrawableDevFunds,
+          event.srcAddress
+        );
         
         context.Project.set({
           ...project,
@@ -487,8 +546,10 @@ export const handlePhaseFundsWithdrawn = CornerstoneProject.PhaseFundsWithdrawn.
     let project = await context.Project.get(projectAddress);
     if (project) {
       try {
-        const projectContract = context.CornerstoneProject.get(event.srcAddress);
-        const withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+        const withdrawableDevFunds = await context.effect(
+          getWithdrawableDevFunds,
+          event.srcAddress
+        );
         
         context.Project.set({
           ...project,
