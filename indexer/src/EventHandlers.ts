@@ -9,9 +9,50 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
   async ({ event, context }) => {
     const projectAddress = event.params.project.toLowerCase();
     const txHash = event.block.hash;
-
-    // Get metadataURI from event params
     const metadataURI = event.params.metadataURI || "";
+
+    // Fetch metadata from IPFS if URI is provided
+    let projectName: string | undefined;
+    let projectDescription: string | undefined;
+    let projectImage: string | undefined;
+    let metadataFetched = false;
+    let metadataFetchError: string | undefined;
+
+    if (metadataURI) {
+      try {
+        // Convert IPFS URI to HTTP gateway URL
+        const httpUrl = metadataURI.startsWith('ipfs://')
+          ? metadataURI.replace('ipfs://', 'https://w3s.link/ipfs/')
+          : metadataURI.startsWith('http')
+          ? metadataURI
+          : `https://w3s.link/ipfs/${metadataURI}`;
+
+        // Fetch metadata with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+        const response = await fetch(httpUrl, { 
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+          }
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const metadata = await response.json();
+          projectName = metadata.name;
+          projectDescription = metadata.description;
+          projectImage = metadata.image;
+          metadataFetched = true;
+        } else {
+          metadataFetchError = `HTTP ${response.status}`;
+        }
+      } catch (error: any) {
+        metadataFetchError = error?.message || 'Fetch failed';
+        console.error(`Failed to fetch metadata for project ${projectAddress}:`, error);
+      }
+    }
 
     context.Project.set({
       id: projectAddress,
@@ -21,6 +62,12 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
       createdAtBlock: BigInt(event.block.number),
       createdAtTimestamp: BigInt(event.block.timestamp),
       metadataURI: metadataURI,
+      // ADD METADATA FIELDS:
+      name: projectName,
+      description: projectDescription,
+      imageURI: projectImage,
+      metadataFetched: metadataFetched,
+      metadataFetchError: metadataFetchError,
       projectState_id: projectAddress,
     });
 
