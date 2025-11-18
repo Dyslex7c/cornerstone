@@ -1,11 +1,11 @@
-\import { ProjectRegistry, CornerstoneProject } from "generated";
+import { ProjectRegistry, CornerstoneProject } from "generated";
 import { experimental_createEffect, S, type EffectContext } from "envio";
 
-// Define schema for project metadata
+// Define schema for project metadata - using nullable types properly
 const projectMetadataSchema = S.schema({
-  name: S.optional(S.string),
-  description: S.optional(S.string),
-  image: S.optional(S.string),
+  name: S.nullable(S.string),
+  description: S.nullable(S.string),
+  image: S.nullable(S.string),
 });
 
 type ProjectMetadata = S.Infer<typeof projectMetadataSchema>;
@@ -32,14 +32,14 @@ function convertIpfsToHttp(uri: string): string | null {
   return null;
 }
 
-// Fetch from a specific endpoint
+// Fetch from a specific endpoint with shorter timeout
 async function fetchFromEndpoint(
   context: EffectContext,
   url: string
 ): Promise<ProjectMetadata | null> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // Reduced to 5s
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -53,9 +53,9 @@ async function fetchFromEndpoint(
     if (response.ok) {
       const metadata = await response.json();
       return {
-        name: metadata.name,
-        description: metadata.description,
-        image: metadata.image,
+        name: metadata.name || null,
+        description: metadata.description || null,
+        image: metadata.image || null,
       };
     } else {
       context.log.warn(`IPFS didn't return 200`, { url, status: response.status });
@@ -68,19 +68,25 @@ async function fetchFromEndpoint(
 }
 
 // Create the effect for fetching IPFS metadata
+// CRITICAL FIX: Added async keyword here
 export const getProjectMetadata = experimental_createEffect(
   {
     name: "getProjectMetadata",
     input: S.string,
     output: projectMetadataSchema,
-    cache: true, // Enable caching to avoid refetching
+    cache: true,
   },
   async ({ input: metadataURI, context }) => {
+    // Return early if no URI
+    if (!metadataURI || metadataURI.trim() === "") {
+      return { name: null, description: null, image: null };
+    }
+
     const httpUrl = convertIpfsToHttp(metadataURI);
     
     if (!httpUrl) {
       context.log.warn("Invalid metadata URI", { metadataURI });
-      return { name: undefined, description: undefined, image: undefined };
+      return { name: null, description: null, image: null };
     }
 
     // Try the converted URL first
@@ -98,8 +104,8 @@ export const getProjectMetadata = experimental_createEffect(
       }
     }
 
-    // Return empty metadata if all attempts fail
-    return { name: undefined, description: undefined, image: undefined };
+    // Return null metadata if all attempts fail
+    return { name: null, description: null, image: null };
   }
 );
 
@@ -112,20 +118,27 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
   loader: async ({ event, context }) => {
     const metadataURI = event.params.metadataURI || "";
     
-    if (metadataURI) {
-      // Use context.effect() to call the effect in the loader
-      return await context.effect(getProjectMetadata, metadataURI);
+    // CRITICAL FIX: Wrap in try-catch to prevent loader failures from blocking indexer
+    try {
+      if (metadataURI) {
+        return await context.effect(getProjectMetadata, metadataURI);
+      }
+    } catch (error) {
+      context.log.error("Error fetching metadata in loader", { 
+        error: error instanceof Error ? error.message : String(error),
+        metadataURI 
+      });
     }
     
-    return { name: undefined, description: undefined, image: undefined };
+    return { name: null, description: null, image: null };
   },
   handler: async ({ event, context, loaderReturn }) => {
     const projectAddress = event.params.project.toLowerCase();
     const txHash = event.block.hash;
     const metadataURI = event.params.metadataURI || "";
 
-    // Get metadata from loaderReturn (not from effect directly)
-    const metadata = loaderReturn;
+    // Get metadata from loaderReturn
+    const metadata = loaderReturn || { name: null, description: null, image: null };
     const metadataFetched = !!(metadata.name || metadata.description || metadata.image);
 
     context.Project.set({
@@ -136,10 +149,10 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
       createdAtBlock: BigInt(event.block.number),
       createdAtTimestamp: BigInt(event.block.timestamp),
       metadataURI: metadataURI,
-      // Metadata fields from IPFS
-      name: metadata.name,
-      description: metadata.description,
-      imageURI: metadata.image,
+      // Metadata fields from IPFS - handle nulls properly
+      name: metadata.name || undefined,
+      description: metadata.description || undefined,
+      imageURI: metadata.image || undefined,
       metadataFetched: metadataFetched,
       metadataFetchError: metadataFetched ? undefined : "Failed to fetch metadata",
       projectState_id: projectAddress,
