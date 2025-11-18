@@ -157,7 +157,7 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
     let withdrawableDevFunds = 0n;
 
     try {
-      const projectContract = context.Project.get(event.params.project);
+      const projectContract = context.CornerstoneProject.get(event.params.project);
       
       // These are view functions on the CornerstoneProject contract
       minRaise = await projectContract.minRaise();
@@ -267,7 +267,7 @@ export const handleDeposit = CornerstoneProject.Deposit.handler(
     let project = await context.Project.get(projectAddress);
     if (project) {
       try {
-        const projectContract = context.Project.get(event.srcAddress);
+        const projectContract = context.CornerstoneProject.get(event.srcAddress);
         const withdrawableDevFunds = await projectContract.withdrawableDevFunds();
         
         context.Project.set({
@@ -487,7 +487,7 @@ export const handlePhaseFundsWithdrawn = CornerstoneProject.PhaseFundsWithdrawn.
     let project = await context.Project.get(projectAddress);
     if (project) {
       try {
-        const projectContract = context.Project.get(event.srcAddress);
+        const projectContract = context.CornerstoneProject.get(event.srcAddress);
         const withdrawableDevFunds = await projectContract.withdrawableDevFunds();
         
         context.Project.set({
