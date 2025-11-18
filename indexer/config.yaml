@@ -1,6 +1,5 @@
 name: Cornerstone Project
 description: Cornerstone Project Indexer
-preload_handlers: true
 
 contracts:
   - name: ProjectRegistry

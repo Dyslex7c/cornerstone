@@ -1,107 +1,17 @@
 import { ProjectRegistry, CornerstoneProject } from "generated";
 
-// IPFS gateways to try
-const IPFS_GATEWAYS = [
-  "https://w3s.link/ipfs",
-  "https://cloudflare-ipfs.com/ipfs",
-  "https://ipfs.io/ipfs",
-];
-
-// Helper function to convert IPFS URI to HTTP URL
-function convertIpfsToHttp(uri: string): string | null {
-  if (!uri) return null;
-  
-  if (uri.startsWith('ipfs://')) {
-    return uri.replace('ipfs://', `${IPFS_GATEWAYS[0]}/`);
-  } else if (uri.startsWith('http')) {
-    return uri;
-  } else if (uri.startsWith('Qm') || uri.startsWith('baf')) {
-    return `${IPFS_GATEWAYS[0]}/${uri}`;
-  }
-  
-  return null;
-}
-
-// Fetch metadata from IPFS - simplified version
-async function fetchMetadata(metadataURI: string, context: any) {
-  if (!metadataURI || metadataURI.trim() === "") {
-    return { name: null, description: null, image: null };
-  }
-
-  const httpUrl = convertIpfsToHttp(metadataURI);
-  
-  if (!httpUrl) {
-    context.log.warn("Invalid metadata URI", { metadataURI });
-    return { name: null, description: null, image: null };
-  }
-
-  // Try each gateway
-  const urlsToTry = [httpUrl];
-  
-  // Add alternative gateways for IPFS URIs
-  if (metadataURI.startsWith('ipfs://') || metadataURI.startsWith('Qm') || metadataURI.startsWith('baf')) {
-    const hash = metadataURI.replace('ipfs://', '');
-    for (let i = 1; i < IPFS_GATEWAYS.length; i++) {
-      urlsToTry.push(`${IPFS_GATEWAYS[i]}/${hash}`);
-    }
-  }
-
-  // Try each URL
-  for (const url of urlsToTry) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: { 'Accept': 'application/json' }
-      });
-      
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const metadata = await response.json();
-        return {
-          name: metadata.name || null,
-          description: metadata.description || null,
-          image: metadata.image || null,
-        };
-      }
-    } catch (e) {
-      context.log.debug(`IPFS fetch failed for ${url}`, { err: e });
-    }
-  }
-
-  return { name: null, description: null, image: null };
-}
-
 // Register new CornerstoneProject contracts dynamically
 ProjectRegistry.ProjectCreated.contractRegister(({ event, context }) => {
   context.addCornerstoneProject(event.params.project);
 });
 
-export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLoader({
-  loader: async ({ event, context }) => {
-    const metadataURI = event.params.metadataURI || "";
-    
-    try {
-      // Fetch metadata directly without using experimental_createEffect
-      return await fetchMetadata(metadataURI, context);
-    } catch (error) {
-      context.log.error("Error fetching metadata in loader", { 
-        error: error instanceof Error ? error.message : String(error),
-        metadataURI 
-      });
-      return { name: null, description: null, image: null };
-    }
-  },
-  handler: async ({ event, context, loaderReturn }) => {
+export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
+  async ({ event, context }) => {
     const projectAddress = event.params.project.toLowerCase();
     const txHash = event.block.hash;
-    const metadataURI = event.params.metadataURI || "";
 
-    const metadata = loaderReturn || { name: null, description: null, image: null };
-    const metadataFetched = !!(metadata.name || metadata.description || metadata.image);
+    // Get metadataURI from event params
+    const metadataURI = event.params.metadataURI || "";
 
     context.Project.set({
       id: projectAddress,
@@ -111,12 +21,12 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
       createdAtBlock: BigInt(event.block.number),
       createdAtTimestamp: BigInt(event.block.timestamp),
       metadataURI: metadataURI,
-      name: metadata.name || undefined,
-      description: metadata.description || undefined,
-      imageURI: metadata.image || undefined,
-      metadataFetched: metadataFetched,
-      metadataFetchError: metadataFetched ? undefined : "Failed to fetch metadata",
       projectState_id: projectAddress,
+      description: undefined,
+      imageURI: undefined,
+      metadataFetchError: undefined,
+      metadataFetched: false,
+      name: undefined
     });
 
     context.ProjectCreatedEvent.set({
@@ -151,6 +61,9 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
       lastUpdatedTimestamp: BigInt(event.block.timestamp),
     });
 
+    // Get phase caps from contract storage
+    // We need to calculate the phase caps from the contract's phaseCapsBps and maxRaise
+    // For now, we'll set them to 0 and they can be updated later when we have a way to call contract functions
     for (let i = 0; i <= 5; i++) {
       const phaseMetricsId = `${projectAddress}-phase-${i}`;
       context.PhaseMetrics.set({
@@ -158,11 +71,11 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
         project_id: projectAddress,
         projectState_id: projectAddress,
         phaseId: i,
-        phaseCap: 0n,
+        phaseCap: 0n, // TODO: Calculate from contract storage
         phaseWithdrawn: 0n,
-        aprBps: 0n,
-        duration: 0n,
-        capBps: 0n,
+        aprBps: 0n, // TODO: Get from contract storage
+        duration: 0n, // TODO: Get from contract storage
+        capBps: 0n, // TODO: Get from contract storage
         isClosed: false,
         closedAtBlock: undefined,
         closedAtTimestamp: undefined,
@@ -187,7 +100,7 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handlerWithLo
       });
     }
   }
-});
+);
 
 export const handleDeposit = CornerstoneProject.Deposit.handler(
   async ({ event, context }) => {
@@ -598,6 +511,7 @@ export const handlePhaseConfiguration = CornerstoneProject.PhaseConfiguration.ha
     const capBps = Array.from(event.params.capBps);
     const phaseCaps = Array.from(event.params.phaseCaps);
 
+    // Store the phase configuration event
     context.PhaseConfigurationEvent.set({
       id: `${txHash}-${event.logIndex}`,
       project_id: projectAddress,
@@ -647,6 +561,7 @@ async function updateDepositorMetrics(
   if (!depositor) return;
 
   if (!metrics) {
+    // Creating new metrics - this is the first activity for this user on this project
     const isFirstDeposit = event.name === "Deposit";
 
     context.DepositorMetrics.set({
