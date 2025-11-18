@@ -4,7 +4,7 @@ import { createPublicClient, http } from "viem";
 import { sepolia } from "viem/chains";
 
 // Setup RPC client with multicall enabled
-const RPC_URL = process.env.RPC_URL || "https://rpc.sepolia.org";
+const RPC_URL = process.env.RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
 const client = createPublicClient({
   chain: sepolia,
   batch: { multicall: true }, // Enable multicall batching
