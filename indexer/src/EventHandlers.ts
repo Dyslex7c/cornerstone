@@ -10,7 +10,6 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
     const projectAddress = event.params.project.toLowerCase();
     const txHash = event.block.hash;
     const metadataURI = event.params.metadataURI || "";
-
     // Fetch metadata from IPFS if URI is provided
     let projectName: string | undefined;
     let projectDescription: string | undefined;
