@@ -1,4 +1,6 @@
 const hre = require('hardhat');
+const fs = require('fs');
+const path = require('path');
 
 // Env:
 // - SEPOLIA_RPC_URL: RPC endpoint
@@ -41,7 +43,20 @@ async function main() {
     const aprs = [0, 800, 1000, 1200, 1000, 0];
     const durations = [0, 0, 0, 0, 0, 0];
     const caps = [0, 1500, 1500, 2000, 3000, 2000];
-    const tx = await reg.createProjectWithTokenMeta(stablecoin, name, sym, minRaise, maxRaise, deadline, aprs, durations, caps);
+    const metadataURI = '';
+    
+    const tx = await reg.createProjectWithTokenMeta(
+      stablecoin, 
+      name, 
+      sym, 
+      minRaise, 
+      maxRaise, 
+      deadline, 
+      aprs, 
+      durations, 
+      caps,
+      metadataURI
+    );
     const rc = await tx.wait();
     const evt = rc.logs.find(l => l.fragment && l.fragment.name === 'ProjectCreated');
     const project = evt?.args?.project || '0x';
@@ -54,6 +69,31 @@ async function main() {
   console.log(`VITE_RPC_URL=${process.env.SEPOLIA_RPC_URL || ''}`);
   console.log(`VITE_PYUSD_ADDRESS=${stablecoin}`);
   console.log(`VITE_REGISTRY_ADDRESS=${registry}`);
+
+  // Update DEPLOYMENT.md with registry address
+  try {
+    const deploymentPath = path.join(__dirname, '..', 'DEPLOYMENT.md');
+    let content = '';
+    
+    if (fs.existsSync(deploymentPath)) {
+      content = fs.readFileSync(deploymentPath, 'utf8');
+      // Replace existing registry address line or add if not found
+      const registryRegex = /Registry Contract Address:\s*0x[a-fA-F0-9]{40}/;
+      if (registryRegex.test(content)) {
+        content = content.replace(registryRegex, `Registry Contract Address: ${registry}`);
+      } else {
+        content += `\n\nRegistry Contract Address: ${registry}\n`;
+      }
+    } else {
+      // Create new DEPLOYMENT.md if it doesn't exist
+      content = `# Deployment Information\n\nRegistry Contract Address: ${registry}\n`;
+    }
+    
+    fs.writeFileSync(deploymentPath, content, 'utf8');
+    console.log('\n✓ Updated DEPLOYMENT.md with registry address');
+  } catch (error) {
+    console.error('Error updating DEPLOYMENT.md:', error.message);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
