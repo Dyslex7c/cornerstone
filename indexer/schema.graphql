@@ -19,6 +19,9 @@ type Project {
   imageURI: String
   metadataFetched: Boolean!
   metadataFetchError: String
+  minRaise: BigInt!
+  maxRaise: BigInt!
+  withdrawableDevFunds: BigInt!
   projectState: ProjectState
   depositors: [DepositorMetrics!]! @derivedFrom(field: "project")
   events: [ProjectCreatedEvent!]! @derivedFrom(field: "project")

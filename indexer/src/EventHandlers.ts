@@ -152,6 +152,21 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
       }
     }
 
+    let minRaise = 0n;
+    let maxRaise = 0n;
+    let withdrawableDevFunds = 0n;
+
+    try {
+      const projectContract = context.Project.get(event.params.project);
+      
+      // These are view functions on the CornerstoneProject contract
+      minRaise = await projectContract.minRaise();
+      maxRaise = await projectContract.maxRaise();
+      withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+    } catch (error) {
+      context.log.error("Error fetching project contract values", error as Error);
+    }
+
     context.Project.set({
       id: projectAddress,
       address: event.params.project,
@@ -166,6 +181,9 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
       metadataFetchError: metadataFetchError,
       metadataFetched: metadata !== undefined,
       name: metadata?.name,
+      minRaise: minRaise,              
+      maxRaise: maxRaise,              
+      withdrawableDevFunds: withdrawableDevFunds,
     });
 
     context.ProjectCreatedEvent.set({
@@ -245,6 +263,21 @@ export const handleDeposit = CornerstoneProject.Deposit.handler(
   async ({ event, context }) => {
     const depositorId = event.params.user.toLowerCase();
     const projectAddress = event.srcAddress.toLowerCase();
+
+    let project = await context.Project.get(projectAddress);
+    if (project) {
+      try {
+        const projectContract = context.Project.get(event.srcAddress);
+        const withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+        
+        context.Project.set({
+          ...project,
+          withdrawableDevFunds: withdrawableDevFunds,
+        });
+      } catch (error) {
+        context.log.error("Error updating withdrawableDevFunds", error as Error);
+      }
+    }
 
     let depositor = await context.Depositor.get(depositorId);
 
@@ -450,6 +483,21 @@ export const handlePhaseFundsWithdrawn = CornerstoneProject.PhaseFundsWithdrawn.
     const projectAddress = event.srcAddress.toLowerCase();
     const txHash = event.block.hash;
     const phaseId = Number(event.params.phaseId);
+
+    let project = await context.Project.get(projectAddress);
+    if (project) {
+      try {
+        const projectContract = context.Project.get(event.srcAddress);
+        const withdrawableDevFunds = await projectContract.withdrawableDevFunds();
+        
+        context.Project.set({
+          ...project,
+          withdrawableDevFunds: withdrawableDevFunds,
+        });
+      } catch (error) {
+        context.log.error("Error updating withdrawableDevFunds", error as Error);
+      }
+    }
 
     context.PhaseFundsWithdrawnEvent.set({
       id: `${txHash}-${event.logIndex}`,
