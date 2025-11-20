@@ -33,3 +33,4 @@ networks:
       
       - name: CornerstoneProject
         address: "0x0000000000000000000000000000000000000000" # wildcard - indexes all instances
+        
