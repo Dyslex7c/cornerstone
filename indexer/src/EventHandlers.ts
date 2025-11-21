@@ -319,6 +319,7 @@ export const handleProjectCreated = ProjectRegistry.ProjectCreated.handler(
       minRaise: minRaise,              
       maxRaise: maxRaise,              
       withdrawableDevFunds: withdrawableDevFunds,
+      appraisalReportSubmitted: false
     });
 
     context.ProjectCreatedEvent.set({

@@ -16,6 +16,7 @@ contracts:
       - event: InterestClaimed(address indexed user, uint256 amount)
       - event: ReserveFunded(uint256 amount, address indexed by)
       - event: FundraiseClosed(bool successful)
+      - event: InitialAppraisalSubmitted(bytes32 appraisalHash, string metadataURI)
       - event: PhaseClosed(uint8 indexed phaseId, string[] docTypes, bytes32[] docHashes, string[] metadataURIs)
       - event: PhaseFundsWithdrawn(uint8 indexed phaseId, uint256 amount)
       - event: AppraisalSubmitted(uint256 percentComplete, bytes32 appraisalHash)

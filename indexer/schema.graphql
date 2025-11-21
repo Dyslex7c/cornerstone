@@ -22,6 +22,7 @@ type Project {
   minRaise: BigInt!
   maxRaise: BigInt!
   withdrawableDevFunds: BigInt!
+  appraisalReportSubmitted: Boolean!
   projectState: ProjectState
   depositors: [DepositorMetrics!]! @derivedFrom(field: "project")
   events: [ProjectCreatedEvent!]! @derivedFrom(field: "project")
@@ -32,6 +33,7 @@ type Project {
   phasesClosed: [PhaseClosedEvent!]! @derivedFrom(field: "project")
   fundWithdrawn: [PhaseFundsWithdrawnEvent!]! @derivedFrom(field: "project")
   appraisals: [AppraisalSubmittedEvent!]! @derivedFrom(field: "project")
+  initialAppraisals: [InitialAppraisalSubmittedEvent!]! @derivedFrom(field: "project")
   salesProceeds: [SalesProceedsSubmittedEvent!]! @derivedFrom(field: "project")
   principalClaims: [PrincipalClaimedEvent!]! @derivedFrom(field: "project")
   revenueClaims: [RevenueClaimedEvent!]! @derivedFrom(field: "project")
@@ -205,6 +207,17 @@ type AppraisalSubmittedEvent {
   projectAddress: Bytes!
   percentComplete: BigInt!
   appraisalHash: Bytes!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: String!
+}
+
+type InitialAppraisalSubmittedEvent {
+  id: ID!
+  project: Project! @index
+  projectAddress: Bytes!
+  appraisalHash: Bytes!
+  metadataURI: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt!
   transactionHash: String!
