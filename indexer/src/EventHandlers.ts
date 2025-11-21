@@ -704,6 +704,58 @@ export const handleAppraisalSubmitted = CornerstoneProject.AppraisalSubmitted.ha
   }
 );
 
+export const handleInitialAppraisalSubmitted = CornerstoneProject.InitialAppraisalSubmitted.handler(
+  async ({ event, context }) => {
+    const projectAddress = event.srcAddress.toLowerCase();
+    const txHash = event.block.hash;
+
+    console.log('[InitialAppraisal] Processing event:', {
+      projectAddress,
+      appraisalHash: event.params.appraisalHash,
+      metadataURI: event.params.metadataURI,
+      txHash,
+    });
+
+    context.InitialAppraisalSubmittedEvent.set({
+      id: `${txHash}-${event.logIndex}`,
+      project_id: projectAddress,
+      projectAddress: event.srcAddress,
+      appraisalHash: event.params.appraisalHash,
+      metadataURI: event.params.metadataURI,
+      blockNumber: BigInt(event.block.number),
+      blockTimestamp: BigInt(event.block.timestamp),
+      transactionHash: txHash,
+    });
+
+    // Update project to mark appraisal as submitted AND fetch new withdrawable amount
+    let project = await context.Project.get(projectAddress);
+    if (project) {
+      // Fetch the updated withdrawableDevFunds from the contract
+      let withdrawableDevFunds = 0n;
+      try {
+        withdrawableDevFunds = await context.effect(
+          getWithdrawableDevFunds,
+          event.srcAddress
+        );
+      } catch (error) {
+        context.log.error("Error fetching withdrawableDevFunds after initial appraisal", error as Error);
+      }
+
+      context.Project.set({
+        ...project,
+        appraisalReportSubmitted: true,
+        withdrawableDevFunds: withdrawableDevFunds,
+      });
+      
+      console.log('[InitialAppraisal] Updated project:', {
+        projectAddress,
+        appraisalReportSubmitted: true,
+        withdrawableDevFunds: withdrawableDevFunds.toString(),
+      });
+    }
+  }
+);
+
 export const handleSalesProceedsSubmitted = CornerstoneProject.SalesProceedsSubmitted.handler(
   async ({ event, context }) => {
     const projectAddress = event.srcAddress.toLowerCase();
